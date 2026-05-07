@@ -102,7 +102,206 @@ def get_predictions(df, lookup_df, id_col, name_col, spec_col, amount_col, model
     return np.maximum(np.round(y_pred_days), 1).astype(int)
 
 
+
+def predict_leadtimes_batch(material_id, material_name, material_spec, order_qtys, lookup_df, models):
+    if not order_qtys:
+        return []
+    import pandas as pd
+    df_temp = pd.DataFrame({
+        '品號': [material_id]*len(order_qtys),
+        '品名': [material_name]*len(order_qtys),
+        '規格': [material_spec]*len(order_qtys),
+        '採購數量': order_qtys
+    })
+    preds = get_predictions(df_temp, lookup_df, '品號', '品名', '規格', '採購數量', models)
+    return preds
+
+def find_best_orders_for_material(material_id, material_name, material_spec, demands, supplies, inventory, current_date, lookup_df, models, x_days=30, planning_horizon_days=90):
+    from datetime import timedelta
+    planned_orders = []
+    horizon_date = current_date + timedelta(days=planning_horizon_days)
+    
+    while True:
+        shortage_idx = None
+        shortage_date = None
+        sim_inv = inventory
+        
+        all_events = []
+        for i, d in enumerate(demands):
+            all_events.append({'type': 'demand', 'date': d['date'], 'qty': d['qty'], 'idx': d['idx']})
+        for s in supplies:
+            all_events.append({'type': 'supply', 'date': s['date'], 'qty': s['qty']})
+        for p in planned_orders:
+            all_events.append({'type': 'supply', 'date': p['eta'], 'qty': p['order_qty']})
+            
+        all_events.sort(key=lambda x: (x['date'], 0 if x['type'] == 'supply' else 1))
+        
+        for e in all_events:
+            if e['type'] == 'supply':
+                sim_inv += e['qty']
+            else:
+                sim_inv -= e['qty']
+                if sim_inv < 0:
+                    shortage_idx = e['idx']
+                    shortage_date = e['date']
+                    break
+                    
+        if shortage_idx is None or shortage_date > horizon_date:
+            break
+            
+        # Find index in demands array for shortage_idx
+        demand_start_idx = 0
+        for i, d in enumerate(demands):
+            if d['idx'] == shortage_idx:
+                demand_start_idx = i
+                break
+                
+        review_end = shortage_date + timedelta(days=x_days)
+        candidate_pool = [
+            d for d in demands[demand_start_idx:]
+            if d['date'] <= review_end
+        ]
+        
+        candidates = []
+        order_qtys = []
+        valid_candidates = []
+        
+        for k in range(len(candidate_pool)):
+            covered_events = candidate_pool[:k+1]
+            target_date = covered_events[-1]['date']
+            
+            net_inv_at_target = inventory
+            for e in all_events:
+                if e['date'] <= target_date:
+                    if e['type'] == 'supply':
+                        net_inv_at_target += e['qty']
+                    elif e['type'] == 'demand':
+                        net_inv_at_target -= e['qty']
+            
+            order_qty = -net_inv_at_target if net_inv_at_target < 0 else 0
+            if order_qty > 0:
+                order_qtys.append(order_qty)
+                valid_candidates.append({
+                    "target_date": target_date,
+                    "order_qty": order_qty,
+                    "earliest_required": covered_events[0]['date']
+                })
+                
+        if valid_candidates:
+            lead_times = predict_leadtimes_batch(material_id, material_name, material_spec, order_qtys, lookup_df, models)
+            for vc, lt in zip(valid_candidates, lead_times):
+                eta = current_date + timedelta(days=int(lt))
+                delay_days = max(0, (eta - vc["earliest_required"]).days)
+                score = delay_days * 100 + vc["order_qty"] * 0.1
+                candidates.append({
+                    "material_id": material_id,
+                    "material_name": material_name,
+                    "material_spec": material_spec,
+                    "order_qty": vc["order_qty"],
+                    "eta": eta,
+                    "score": score,
+                    "lead_time": lt
+                })
+                
+        if not candidates:
+            e_demand = demands[demand_start_idx]
+            net_inv_at_target = inventory
+            for ev in all_events:
+                if ev['date'] <= e_demand['date']:
+                    if ev['type'] == 'supply':
+                        net_inv_at_target += ev['qty']
+                    elif ev['type'] == 'demand':
+                        net_inv_at_target -= ev['qty']
+            order_qty = -net_inv_at_target if net_inv_at_target < 0 else e_demand['qty']
+            if order_qty <= 0:
+                 order_qty = e_demand['qty']
+                 
+            lt = predict_leadtimes_batch(material_id, material_name, material_spec, [order_qty], lookup_df, models)[0]
+            eta = current_date + timedelta(days=int(lt))
+            delay_days = max(0, (eta - e_demand['date']).days)
+            best_order = {
+                "material_id": material_id,
+                "material_name": material_name,
+                "material_spec": material_spec,
+                "order_qty": order_qty,
+                "eta": eta,
+                "score": delay_days * 100 + order_qty * 0.1,
+                "lead_time": lt
+            }
+        else:
+            best_order = min(candidates, key=lambda x: x["score"])
+            
+        planned_orders.append(best_order)
+        
+        if len(planned_orders) > len(demands):
+            break
+            
+    return planned_orders
+
+def label_demands(demands, supplies, planned_orders, inventory, planning_horizon_days=90):
+    import pandas as pd
+    from datetime import datetime, timedelta
+    current_date = pd.to_datetime(datetime.now().date())
+    horizon_date = current_date + timedelta(days=planning_horizon_days)
+    
+    events = []
+    for s in supplies:
+        events.append({'type': 'supply', 'source': 'existing', 'date': s['date'], 'qty': s['qty']})
+    for p in planned_orders:
+        events.append({'type': 'supply', 'source': 'planned', 'date': p['eta'], 'qty': p['order_qty']})
+        
+    for d in demands:
+        events.append({'type': 'demand', 'date': d['date'], 'qty': d['qty'], 'idx': d['idx']})
+        
+    events.sort(key=lambda x: (x['date'], 0 if x['type'] == 'supply' else 1))
+    
+    available_stock = inventory
+    available_existing = 0
+    available_planned = 0
+    
+    labels = {}
+    
+    for e in events:
+        if e['type'] == 'supply':
+            if e['source'] == 'existing':
+                available_existing += e['qty']
+            else:
+                available_planned += e['qty']
+        else:
+            req_qty = e['qty']
+            
+            consume_stock = min(req_qty, available_stock)
+            available_stock -= consume_stock
+            req_qty -= consume_stock
+            
+            consume_existing = min(req_qty, available_existing)
+            available_existing -= consume_existing
+            req_qty -= consume_existing
+            
+            consume_planned = min(req_qty, available_planned)
+            available_planned -= consume_planned
+            req_qty -= consume_planned
+            
+            if req_qty > 0:
+                if e['date'] > horizon_date:
+                    labels[e['idx']] = 'grey'
+                else:
+                    labels[e['idx']] = 'red'
+            else:
+                if consume_planned > 0:
+                    labels[e['idx']] = 'orange'
+                else:
+                    labels[e['idx']] = 'green'
+                    
+    return labels
+
 def prepare_and_predict():
+    import os
+    import pandas as pd
+    import joblib
+    import numpy as np
+    from datetime import datetime, timedelta
+
     # 1. 設定路徑
     BASE_DIR = r'C:\local_file\專題\c1'
     MODEL_DIR = r'C:\local_file\專題\model'
@@ -139,137 +338,29 @@ def prepare_and_predict():
     lookup_df = lookup_df.drop_duplicates(subset=['品號'], keep='first')
 
     # =========================================================
-    # 第一部分：預測製程缺料 (Model缺料物料.csv) -> 產出 缺料風險預測報告.csv
+    # 任務 1：預測未到貨採購單 (PURT.csv) -> 產出 叫料單預測結果.csv
     # =========================================================
-    print("【任務 1】正在預測製程缺料...")
-    df_all = pd.read_csv(INPUT_PATH, encoding='utf-8-sig')
-    
-    mask = df_all['缺料狀態'] == '缺料'
-    shortage_df = df_all[mask].copy()
-    normal_df = df_all[~mask].copy()
-
-    if not shortage_df.empty:
-        # 呼叫預測函式
-        pred_days = get_predictions(
-            df=shortage_df, 
-            lookup_df=lookup_df, 
-            id_col='材料品號', 
-            name_col='材料品名', 
-            spec_col='材料規格', 
-            amount_col='缺料數量', 
-            models=models
-        )
-        shortage_df['預測LeadTime'] = pred_days
-        
-        today = datetime.now()
-        shortage_df['預測進貨日期'] = pd.to_datetime(shortage_df['預測LeadTime'].apply(lambda x: today + timedelta(days=int(x))))
-        shortage_df['預計開工日'] = pd.to_datetime(shortage_df['預計開工日'])
-        
-        shortage_df['預計延遲天數'] = (shortage_df['預測進貨日期'] - shortage_df['預計開工日']).dt.days
-
-        conditions = [
-            shortage_df['預計延遲天數'] > 5,
-            (shortage_df['預計延遲天數'] >= 0) & (shortage_df['預計延遲天數'] <= 5),
-            shortage_df['預計延遲天數'] < 0
-        ]
-        choices = ['極高', '中', '低']
-        shortage_df['風險評估'] = np.select(conditions, choices, default='普通')
-
-        shortage_df['預測進貨日期'] = shortage_df['預測進貨日期'].dt.strftime('%Y-%m-%d')
-        shortage_df['預計開工日'] = shortage_df['預計開工日'].dt.strftime('%Y-%m-%d')
-
-        shortage_df.rename(columns={
-            '預測LeadTime': '預計物料延誤天數',
-            '預計開工日': '實際開工日',
-            '預計延遲天數': '預計延遲開機天數'
-        }, inplace=True)
-
-    if not normal_df.empty:
-        normal_df['實際開工日'] = pd.to_datetime(normal_df['預計開工日'], errors='coerce').dt.strftime('%Y-%m-%d')
-        for col in ['預計物料延誤天數', '預測進貨日期', '預計延遲開機天數', '風險評估']:
-            normal_df[col] = ""
-
-    final_combined = pd.concat([shortage_df, normal_df], ignore_index=True)
-    
-    output_cols = ['製令單號', '產品品名', '製程名稱', '材料品號', '材料品名', '材料規格', '預計用料', '庫存數量', '缺料數量', '實際開工日', '預計物料延誤天數', '預測進貨日期', '預計延遲開機天數', '風險評估']
-    final_combined['預計延遲開機天數'] = final_combined['預計延遲開機天數'].astype(int)
-    final_combined['預計物料延誤天數'] = final_combined['預計物料延誤天數'].astype(int)
-
-    for col in output_cols:
-        if col not in final_combined.columns:
-            final_combined[col] = ""
-
-    final_df = final_combined[output_cols].sort_values(by='實際開工日')
-
-    final_csv = os.path.join(MODEL_DIR, '缺料風險預測報告.csv')
-    final_df.to_csv(final_csv, index=False, encoding='utf-8-sig', sep=',')
-
-    output_txt = os.path.join(MODEL_DIR, 'Risk_Report.txt')
-    high_risk_df = final_df[final_df['風險評估'].isin(['極高', '中'])]
-
-    with open(output_txt, 'w', encoding='utf-8-sig') as f:
-        f.write(f"=== AI 缺料風險預警報告 ({datetime.now().strftime('%Y-%m-%d')}) ===\n\n")
-        f.write(f"目前高風險與極高風險物料共 {len(high_risk_df)} 項：\n\n")
-        for _, row in high_risk_df.iterrows():
-            f.write(f"【製令】: {row['製令單號']}\n")
-            f.write(f"  物料: {row['材料品號']} ({row['材料品名']})\n")
-            f.write(f"  預計用料: {row['預計用料']}\n")
-            f.write(f"  庫存數量: {row['庫存數量']}\n")
-            f.write(f"  缺料數量: {row['缺料數量']}\n")
-            f.write(f"  實際開工: {row['實際開工日']}\n")
-            f.write(f"  預測進貨: {row['預測進貨日期']} (預估: {row['預計物料延誤天數']}天)\n")
-            icon = "🚨" if row['風險評估'] == '極高' else "⚠️"
-            f.write(f"  狀態: {icon} {row['風險評估']}\n")
-            f.write(f"  預計延遲天數: {row['預計延遲開機天數']}\n")
-            f.write("-" * 30 + "\n")
-
-    print(f"-> 成功產出 CSV 報表：{final_csv}")
-    print(f"-> 成功產出文字報告：{output_txt}")
-
-
-    # =========================================================
-    # 第二部分：預測未交採購單 (PURT.csv) -> 產出 叫料單.csv
-    # =========================================================
-    # TODO：
-    # 把過濾出來以交數量 <=0 的df，生成"未到貨叫料單.csv"
-    # 把"未到貨叫料單.csv" 與 "model缺料物料.csv"進行合併。(這裡的資料是已有的叫料訂單與現在缺料的訂單，合併後我想得到的是未來物料數量的波動)
-    # 合併方式為: 依照時間排序物料分組，相同物料抓出第一個製程的時間到往後30天的所有製程的所需數量，得到一個各個物料所需要叫料的數量。
-    # 把這些數據丟進model 預測。
-    # 之後會生成一個"未來叫料單.csv"，裡面會有 [品號,品名,規格,採購數量,預計到料時間]這些欄位。
-
-    print("【任務 2】正在預測採購未交單據 (叫料單)...")
+    print("【任務 1】正在預測採購未交單據 (叫料單)...")
+    final_purt_df = None
     if os.path.exists(PURT_PATH):
         purt_df = pd.read_csv(PURT_PATH, dtype={'品號': str}, encoding='utf-8-sig')
-        
-        # 欄位清洗
         purt_df.columns = purt_df.columns.str.strip()
-        
-        # 確保已交數量為數值
         purt_df['已交數量'] = pd.to_numeric(purt_df['已交數量'], errors='coerce').fillna(0)
         
-        # 過濾未到料且符合特定物料前綴的單據
         prefixes = ('M0', 'M2', 'E', 'K', 'm0', 'm2', 'e', 'k')
         unfulfilled_mask = (purt_df['已交數量'] <= 0) & (purt_df['品號'].str.startswith(prefixes))
         purt_target_df = purt_df[unfulfilled_mask].copy()
         
         if not purt_target_df.empty:
             purt_pred_days = get_predictions(
-                df=purt_target_df, 
-                lookup_df=lookup_df, 
-                id_col='品號', 
-                name_col='品名', 
-                spec_col='規格', 
-                amount_col='採購數量', 
-                models=models
+                df=purt_target_df, lookup_df=lookup_df, 
+                id_col='品號', name_col='品名', spec_col='規格', 
+                amount_col='採購數量', models=models
             )
             purt_target_df['預測LeadTime'] = purt_pred_days
-            
-            # 計算預計到料時間 = 採購日期 + 預測LeadTime
-            # 如果沒有採購日期，則用今天
             purt_target_df['採購日期'] = pd.to_datetime(purt_target_df['採購日期'], errors='coerce')
             default_date = pd.to_datetime(datetime.now().date())
-            purt_target_df['採購日期'] = purt_target_df['採購\46
-            '日期'].fillna(default_date)
+            purt_target_df['採購日期'] = purt_target_df['採購日期'].fillna(default_date)
             
             purt_target_df['預計到料時間'] = purt_target_df.apply(
                 lambda row: row['採購日期'] + timedelta(days=int(row['預測LeadTime'])), axis=1
@@ -278,30 +369,116 @@ def prepare_and_predict():
             purt_target_df['預計到料時間'] = purt_target_df['預計到料時間'].dt.strftime('%Y-%m-%d')
             purt_target_df['採購日期'] = purt_target_df['採購日期'].dt.strftime('%Y-%m-%d')
             
-            # 整理叫料單欄位
             order_cols = ['採購單別', '採購單號', '品號', '品名', '規格', '採購數量', '已交數量', '預計到料時間']
+            for col in ['採購單別', '採購單號', '採購數量', '已交數量']:
+                if col in purt_target_df.columns:
+                    purt_target_df[col] = pd.to_numeric(purt_target_df[col], errors='coerce').fillna(0).astype(int)
 
-            purt_target_df['採購單別'] = purt_target_df['採購單別'].astype(int)
-            purt_target_df['採購單號'] = purt_target_df['採購單號'].astype(int)
-            purt_target_df['採購數量'] = purt_target_df['採購數量'].astype(int)
-            purt_target_df['已交數量'] = purt_target_df['已交數量'].astype(int)
-
-            # 保留有在 DataFrame 的欄位
             available_order_cols = [c for c in order_cols if c in purt_target_df.columns]
-            
             final_purt_df = purt_target_df[available_order_cols]
             
             purt_csv = os.path.join(MODEL_DIR, '叫料單預測結果.csv')
             final_purt_df.to_csv(purt_csv, index=False, encoding='utf-8-sig', sep=',')
-            print(f"-> 成功產出 叫料單.csv：{purt_csv} (共 {len(final_purt_df)} 筆)")
+            print(f"-> 成功產出 叫料單預測結果.csv：{purt_csv} (共 {len(final_purt_df)} 筆)")
         else:
             print("-> 無符合條件的未交採購單需要預測。")
     else:
         print(f"警告：找不到 PURT 檔案 {PURT_PATH}")
 
+    # =========================================================
+    # 任務 2：生成未來叫料單與物料狀態標記
+    # =========================================================
+    print("【任務 2】正在生成未來叫料單與標記物料狀態...")
+    df_shortage = pd.read_csv(INPUT_PATH, encoding='utf-8-sig')
+    df_shortage['預計開工日'] = pd.to_datetime(df_shortage['預計開工日'], errors='coerce')
+    
+    current_date = pd.to_datetime(datetime.now().date())
+    
+    # 準備現有的 PURT supply events
+    purt_supplies = {}
+    if final_purt_df is not None and not final_purt_df.empty:
+        for _, row in final_purt_df.iterrows():
+            mat_id = row['品號']
+            if mat_id not in purt_supplies:
+                purt_supplies[mat_id] = []
+            purt_supplies[mat_id].append({
+                'date': pd.to_datetime(row['預計到料時間']),
+                'qty': int(row['採購數量'])
+            })
+            
+    all_planned_orders = []
+    
+    df_shortage['缺料狀態標記'] = 'grey'
+    
+    for mat_id, group in df_shortage.groupby('材料品號'):
+        group = group.sort_values('預計開工日')
+        
+        material_name = group['材料品名'].iloc[0]
+        material_spec = group['材料規格'].iloc[0]
+        
+        inventory_val = group['庫存數量'].iloc[0]
+        try:
+            inventory = int(pd.to_numeric(inventory_val))
+        except:
+            inventory = 0
+            
+        demands = []
+        for orig_idx, row in group.iterrows():
+            try:
+                qty = int(pd.to_numeric(row['預計用料']))
+            except:
+                qty = 0
+            demands.append({
+                'date': row['預計開工日'],
+                'qty': qty,
+                'idx': orig_idx
+            })
+            
+        supplies = purt_supplies.get(mat_id, [])
+        
+        planned_orders = find_best_orders_for_material(
+            material_id=mat_id,
+            material_name=material_name,
+            material_spec=material_spec,
+            demands=demands,
+            supplies=supplies,
+            inventory=inventory,
+            current_date=current_date,
+            lookup_df=lookup_df,
+            models=models
+        )
+        all_planned_orders.extend(planned_orders)
+        
+        labels = label_demands(demands, supplies, planned_orders, inventory)
+        for orig_idx, label in labels.items():
+            df_shortage.at[orig_idx, '缺料狀態標記'] = label
+            
+    tagged_path = os.path.join(MODEL_DIR, 'Model缺料物料_加上預測與標記.csv')
+    df_shortage['預計開工日'] = df_shortage['預計開工日'].dt.strftime('%Y-%m-%d')
+    df_shortage.to_csv(tagged_path, index=False, encoding='utf-8-sig')
+    print(f"-> 成功產出 標記後的缺料表：{tagged_path}")
+    
+    if all_planned_orders:
+        future_orders_df = pd.DataFrame(all_planned_orders)
+        future_orders_df['預計到料時間'] = future_orders_df['eta'].dt.strftime('%Y-%m-%d')
+        future_orders_df = future_orders_df.rename(columns={
+            'material_id': '品號',
+            'material_name': '品名',
+            'material_spec': '規格',
+            'order_qty': '採購數量',
+            'lead_time': '預測LeadTime'
+        })
+        future_orders_df = future_orders_df[['品號', '品名', '規格', '採購數量', '預測LeadTime', '預計到料時間', 'score']]
+        
+        future_purt_csv = os.path.join(MODEL_DIR, '未來叫料單.csv')
+        future_orders_df.to_csv(future_purt_csv, index=False, encoding='utf-8-sig')
+        print(f"-> 成功產出 未來叫料單.csv：{future_purt_csv} (共 {len(future_orders_df)} 筆)")
+    else:
+        print("-> 無需生成未來叫料單。")
+
     print("-" * 30)
     print("所有預測任務執行完畢！")
     print("-" * 30)
-    
+
 if __name__ == "__main__":
     prepare_and_predict()
