@@ -470,6 +470,9 @@ def prepare_and_predict():
         })
         future_orders_df = future_orders_df[['品號', '品名', '規格', '採購數量', '預測LeadTime', '預計到料時間', 'score']]
         
+        # 一種需要叫料的物料只給出一行即可：保留時間最早的第一筆建議叫料
+        future_orders_df = future_orders_df.sort_values('預計到料時間').drop_duplicates(subset=['品號'], keep='first')
+        
         future_purt_csv = os.path.join(MODEL_DIR, '未來叫料單.csv')
         future_orders_df.to_csv(future_purt_csv, index=False, encoding='utf-8-sig')
         print(f"-> 成功產出 未來叫料單.csv：{future_purt_csv} (共 {len(future_orders_df)} 筆)")
