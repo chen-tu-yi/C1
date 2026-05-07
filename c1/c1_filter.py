@@ -36,6 +36,7 @@ def clean_label(text):
 
 def plot_riskmap(df, col_item, col_delay, step_name):
     # 計算每個物料的平均值和標準差，dropna 是為了忽略只有單筆紀錄導致無法計算 std 的物料
+    png_dir = r"C:\local_file\專題\png\c1"
     stats = df.groupby(col_item)[col_delay].agg(['mean', 'std']).dropna()
     plt.figure(figsize=(12, 9))
     sns.scatterplot(data=stats, x='mean', y='std', color='red', s=100)
@@ -48,7 +49,7 @@ def plot_riskmap(df, col_item, col_delay, step_name):
     plt.xlim(-50, 50)
     plt.ylim(0, 80)
     plt.tight_layout()
-    plt.savefig(f"RiskMap_{step_name}.png", dpi=300)
+    plt.savefig(os.path.join(png_dir, "RiskMap_{step_name}.png", dpi=300)
     plt.close()
 
 def main():

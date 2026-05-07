@@ -4,37 +4,63 @@
 
 ### 1. 工作流
 
+-------
+
 cd c:\local_file\專題
+
 python auto.py                      # 從EPR中依據ERP_Table_Name.xlsx抓取資料到 ERP_Table.xlsx
 
+-------
+
 cd c:\local_file\專題\c1
+
 python c1_PURT.py                   # 從ERP_Table.xlsx中抓PURT檔作為c1物料分析的資料
+
 python c1_filter.py                 # 過濾清洗PURT.csv 的資料
+
 python c1_pre.py                    # model資料前處理    # PT λ leak,
+
 python c1_models.py                 # 訓練model，生成baseline等。
 
+-------
+
 cd c:\local_file\專題\model
+
 python material_storage_table.py    # 生成'製程與所需物料庫存表.csv' 與 'Model缺料物料.csv'
+
 python pre_material.py              # 做前處理以丟給model
+
 python model_predict.py             # 預測模型
+
 python all_table.py                 # 把預測後的結果與整張製程合併在一起，為最終建立db的資料檔"製令總表.csv"
 
 ### TODO
 
-要加上累計需求。加上到貨天數在同張表。
-進貨表一個db，製令一個db(包含所需用量)(用製程所需物料庫存表代替 web自己過濾)。
-TODO: 叫料單內容：叫料單未到料的單據拿出來預測,內容加上[預計到料時間]欄位。流程: 抓出PURT.csv(in ~./c1)，再過濾[已交數量]=0 和的欄位抓出來模型預測。生出"叫料單.csv"，內容只有這些被預測的物料(其他物料已經到貨也不必顯示了)，此斷程式碼生成在~./model 中，名為purt.py。最終確保pre_material.py能處理它原本的該出裡的資料外也能一起處理剛產出的叫料單。若遇到模型前處理相關的問題可先提問。前處理部分相關抓取資料的部分可參考原本的做法。
-
 ------------------------------------------------------------------------------------
-物料單號 (點開來) | 庫存數量 | 總計需買數量(庫存-所需+叫料單)                          |(製令總表-材料品號,材料品名,材料規格,庫存數量)
+
+物料單號 (點開來) | 庫存數量 | 目前需買數量(庫存-所需+叫料單)                          |(製令總表-材料品號,材料品名,材料規格,庫存數量)
+
    |------------------------------------------------                               |
-   |製程 | 所需用量 | 累計量 | 實際開工日(提供更改，與資料庫的同步需討論)(sort in time) |(製令總表-製令單號,預計開工日,產品品名,預計用料,風險評估,預測進貨日期)(先以一個月為分界線採購)
+
+   |製程 | 所需用量 | 累計量 | 預計開工日 | 實際開工日 | 預計到貨日 |                  |(製令總表-製令單號,預計開工日,產品品名,預計用料,風險評估,預測進貨日期)(先以一個月為分界線採購)
+
    |---                                                                            |
+
    |叫料單 | 到料量 | 預測到料時間 |                                                 |(叫料單-採購單別,採購單號,預計到貨日期,庫存數量)
+
    |-------------------------------------------------------------------------------|
 
-db增加累計
-叫料單所需顯示欄位：採購單別 (TD身)採購單號 (TD身)預交日 (TD身)採購數量 (TD身)
+製令表單：
+以製令單號分組
+
+製令單號 |
+
+我需要先把製令分組，從開始缺少物料的那個地方開始算起，以時間一個月為一組產生把所需物料數量加總，再進行模型預測。
+所以現在需要再model_preict.py 中把數量加總，且不需每個有缺料的製程都進行預測。
+流程：全品項物料數量與叫料單進行合併 -> 計算哪些訂單是缺料狀態並過濾掉有料的製程 -> 把有缺料的製令以30天為一組，加總這段期間的數量，放進模型預測 -> 生成出新的表包括預測結果 物料品號 物料名稱 規格 等物料相關資訊。
+
+實作方法：
+把製程與所需物料庫存表 與 叫料單的資訊合併，
 
 ### 2. Git 方法
 
@@ -64,6 +90,8 @@ Category_OneHot (4 維)：品號前綴 (是否為 M0, M2, K, 或 E 系列)
 Hash_ID_Full (256 維)：完整的 14 碼「材料品號」字串映射。
 Hash_ID_Split (4*128 維)：將品號分出四個區段 (如 0-2碼, 2-6碼 等)，分別配置 128 維作特徵雜湊，捕捉特定料號群組效應。
 Hash_Spec (512 維)：將長字串「品名+規格」合成做 512 維度的映射。
+
+最終 Train 大小: (47806, 1299)
 
 ## 當前開發進度與成果 (對齊 RoadMap)
 
@@ -158,9 +186,9 @@ graph TD
 - **14碼完整品號雜湊 (`Hash_ID_Full_`)**: 完整品號透過 FeatureHasher 投影至陣列 (`Hash_ID_Full_0~255`)
 - **分段品號雜湊 (`Hash_ID1_` ~ `Hash_ID4_`)**: 依編碼意義切分四段雜湊，透過 FeatureHasher ，共計產出 4*32=128 維度特徵 (`Hash_ID1_0` 等)
 - **品名+規格雜湊 (`Hash_Spec_`)**: 將品名+規格字串透過 FeatureHasher 進行高維度展開捕獲特定規格特性 (`Hash_Spec_0~255`)
-- **預計進貨天數** (`Expected_LeadTime_Log`) log1p
-- **採購數量** (`Amount_PT`) PowerTransformer
-- **進貨天數(包含非工作日)** (`LeadTime_Holiday_PT`) PowerTransformer
+- **預計進貨天數**            PURT[進貨日期]-[採購日期]                                                  (`Expected_LeadTime_Log`) log1p
+- **採購數量**                PURT[採購數量]                                                             (`Amount_PT`) PowerTransformer
+- **進貨天數(包含非工作日)**                                                               (`LeadTime_Holiday_PT`) PowerTransformer
 - **最近幾次的進貨天數MA** (`LeadTime_MA3`, `LeadTime_MA5`) StandardScaler
 - **歷史進貨天數統計** (`Hist_Mean_LeadTime`, `Hist_Std_LeadTime` 等) StandardScaler
 - **實際進貨天數_靜態統計** (`Hist_Actual_Mean`, `Hist_Actual_Max`, `Hist_Actual_Min` 等) StandardScaler

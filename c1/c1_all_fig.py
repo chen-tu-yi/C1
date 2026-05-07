@@ -32,7 +32,7 @@ def plot_box(df_source, target_index, col_item, title, fname, color_palette):
     if target_index.empty: return
     plot_data = df_source[df_source[col_item].isin(target_index)].copy()
     plt.figure(figsize=(12, 6))
-    sns.boxplot(data=plot_data, x='Analyzed_Delay', y=col_item, order=target_index, palette=color_palette)
+    sns.boxplot(data=plot_data, x='延遲天數', y=col_item, order=target_index, palette=color_palette)
     plt.axvline(0, color='blue', linestyle='--')
     plt.title(title, fontsize=14)
     plt.xlabel('延遲天數', fontsize=12)
@@ -44,7 +44,7 @@ def main():
     print("正在產出分析圖表...")
 
     stats_file = "C1_Stats_Filtered.csv"
-    df_file = "C1_advance-filter.csv"
+    df_file = "C1_advance_filter.csv"
 
     if not os.path.exists(stats_file) or not os.path.exists(df_file):
         print(f"找不到所需檔案: {stats_file} 或 {df_file}，請先執行 c1_filter.py 產出資料。")
@@ -65,24 +65,36 @@ def main():
     # ---------------------------------------------------------
     # (1) 直方圖 (延遲天數分佈)
     plt.figure(figsize=(12, 6))
-    sns.histplot(df_filtered['Analyzed_Delay'], discrete=True, color='#3498db', shrink=0.8)
+    sns.histplot(df_filtered['延遲天數'], discrete=True, color='#3498db', shrink=0.8)
     plt.axvline(0, color='red', linestyle='--', linewidth=2, alpha=0.5)
     plt.title('C1 延遲天數分佈圖', fontsize=14)
     plt.xlabel('延遲天數'), plt.ylabel('筆數'), plt.xlim(-30, 30)
     plt.tight_layout(), plt.savefig(os.path.join(png_dir, 'C1_1_Distribution_advance_filter.png'), dpi=300), plt.close()
 
     # (2) 圓餅圖 (達交狀況)
-    status_counts = df_filtered['Analyzed_Delay'].apply(lambda x: '遲到' if x>0 else ('提早' if x<0 else '準時')).value_counts()
+    status_counts = df_filtered['延遲天數'].apply(lambda x: '遲到' if x>0 else ('提早' if x<0 else '準時')).value_counts()
     plt.figure(figsize=(8, 8))
     plt.pie(status_counts, labels=[f"{idx}\n{val}筆" for idx, val in zip(status_counts.index, status_counts.values)], 
             autopct='%1.1f%%', colors=[{'遲到':'#e74c3c','提早':'#2ecc71','準時':'#f1c40f'}[x] for x in status_counts.index], startangle=90)
     plt.title('C1 達交狀況圓餅圖-清洗後')
     plt.savefig(os.path.join(png_dir, 'C1_2_Pie_advance_filter.png'), dpi=300), plt.close()
+
+    # 新增：2025 年整年限定圓餅圖
+    if '單據日期' in df_filtered.columns:
+        df_filtered['單據日期_dt'] = pd.to_datetime(df_filtered['單據日期'], errors='coerce')
+        df_2025 = df_filtered[df_filtered['單據日期_dt'].dt.year == 2025]
+        if not df_2025.empty:
+            status_counts_2025 = df_2025['延遲天數'].apply(lambda x: '遲到' if x>0 else ('提早' if x<0 else '準時')).value_counts()
+            plt.figure(figsize=(8, 8))
+            plt.pie(status_counts_2025, labels=[f"{idx}\n{val}筆" for idx, val in zip(status_counts_2025.index, status_counts_2025.values)], 
+                    autopct='%1.1f%%', colors=[{'遲到':'#e74c3c','提早':'#2ecc71','準時':'#f1c40f'}[x] for x in status_counts_2025.index], startangle=90)
+            plt.title('C1 達交狀況圓餅圖-2025年')
+            plt.savefig(os.path.join(png_dir, 'C1_2_Pie_2025.png'), dpi=300), plt.close()
     # 匯出另一張"C1 達交狀態圓餅圖-清洗前"
     try:
         df_removed = pd.read_csv('C1_Removed_Items_Full.csv')
         df_all = pd.concat([df_filtered, df_removed], ignore_index=True)
-        status_counts_all = df_all['Analyzed_Delay'].apply(lambda x: '遲到' if x>0 else ('提早' if x<0 else '準時')).value_counts()
+        status_counts_all = df_all['延遲天數'].apply(lambda x: '遲到' if x>0 else ('提早' if x<0 else '準時')).value_counts()
         plt.figure(figsize=(8, 8))
         plt.pie(status_counts_all, labels=[f"{idx}\n{val}筆" for idx, val in zip(status_counts_all.index, status_counts_all.values)], 
                 autopct='%1.1f%%', colors=[{'遲到':'#e74c3c','提早':'#2ecc71','準時':'#f1c40f'}[x] for x in status_counts_all.index], startangle=90)

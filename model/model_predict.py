@@ -192,7 +192,9 @@ def prepare_and_predict():
     final_combined = pd.concat([shortage_df, normal_df], ignore_index=True)
     
     output_cols = ['製令單號', '產品品名', '製程名稱', '材料品號', '材料品名', '材料規格', '預計用料', '庫存數量', '缺料數量', '實際開工日', '預計物料延誤天數', '預測進貨日期', '預計延遲開機天數', '風險評估']
-    
+    final_combined['預計延遲開機天數'] = final_combined['預計延遲開機天數'].astype(int)
+    final_combined['預計物料延誤天數'] = final_combined['預計物料延誤天數'].astype(int)
+
     for col in output_cols:
         if col not in final_combined.columns:
             final_combined[col] = ""
@@ -228,6 +230,13 @@ def prepare_and_predict():
     # =========================================================
     # 第二部分：預測未交採購單 (PURT.csv) -> 產出 叫料單.csv
     # =========================================================
+    # TODO：
+    # 把過濾出來以交數量 <=0 的df，生成"未到貨叫料單.csv"
+    # 把"未到貨叫料單.csv" 與 "model缺料物料.csv"進行合併。(這裡的資料是已有的叫料訂單與現在缺料的訂單，合併後我想得到的是未來物料數量的波動)
+    # 合併方式為: 依照時間排序物料分組，相同物料抓出第一個製程的時間到往後30天的所有製程的所需數量，得到一個各個物料所需要叫料的數量。
+    # 把這些數據丟進model 預測。
+    # 之後會生成一個"未來叫料單.csv"，裡面會有 [品號,品名,規格,採購數量,預計到料時間]這些欄位。
+
     print("【任務 2】正在預測採購未交單據 (叫料單)...")
     if os.path.exists(PURT_PATH):
         purt_df = pd.read_csv(PURT_PATH, dtype={'品號': str}, encoding='utf-8-sig')
@@ -259,7 +268,8 @@ def prepare_and_predict():
             # 如果沒有採購日期，則用今天
             purt_target_df['採購日期'] = pd.to_datetime(purt_target_df['採購日期'], errors='coerce')
             default_date = pd.to_datetime(datetime.now().date())
-            purt_target_df['採購日期'] = purt_target_df['採購日期'].fillna(default_date)
+            purt_target_df['採購日期'] = purt_target_df['採購\46
+            '日期'].fillna(default_date)
             
             purt_target_df['預計到料時間'] = purt_target_df.apply(
                 lambda row: row['採購日期'] + timedelta(days=int(row['預測LeadTime'])), axis=1
@@ -270,12 +280,18 @@ def prepare_and_predict():
             
             # 整理叫料單欄位
             order_cols = ['採購單別', '採購單號', '品號', '品名', '規格', '採購數量', '已交數量', '預計到料時間']
+
+            purt_target_df['採購單別'] = purt_target_df['採購單別'].astype(int)
+            purt_target_df['採購單號'] = purt_target_df['採購單號'].astype(int)
+            purt_target_df['採購數量'] = purt_target_df['採購數量'].astype(int)
+            purt_target_df['已交數量'] = purt_target_df['已交數量'].astype(int)
+
             # 保留有在 DataFrame 的欄位
             available_order_cols = [c for c in order_cols if c in purt_target_df.columns]
             
             final_purt_df = purt_target_df[available_order_cols]
             
-            purt_csv = os.path.join(MODEL_DIR, '叫料單.csv')
+            purt_csv = os.path.join(MODEL_DIR, '叫料單預測結果.csv')
             final_purt_df.to_csv(purt_csv, index=False, encoding='utf-8-sig', sep=',')
             print(f"-> 成功產出 叫料單.csv：{purt_csv} (共 {len(final_purt_df)} 筆)")
         else:

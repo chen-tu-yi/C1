@@ -1,8 +1,7 @@
 '''
-需要把ERP_Table.xlsx中的PURTC/D, PURTG/H 共同合併，組成與下列格式相同的csv檔案，名為PURT。
-採購單別,單別,採購單號,序號,單號(進貨單),採購日期,單據日期,品號,品名,規格,採購數量,數量合計,已交數量,驗收數量,預交日,進貨日期,驗收日期,結案碼,進貨天數,預計進貨天數,延遲天數
-1351,1363,20210831034,2,20250225039,2021/8/31,2025/2/25,M0A38000380100,拉刀桿,拉刀桿/90度頭CTS,5,10,4,1,2025/12/22,2025/2/25,2025/2/25,N,911,1125,214
-.......
+需要把ERP_Table.xlsx中的PURTC/D, PURTG/H 共同合併，組成與下列格式相同的csv檔案。
+
+
 詳細方法為: 
 ERP_Table.xlsx中的sheet-PURTC_PURTD, sheet-PURTG_PURTH 以 [採購單號]欄位做為key，保留：採購單別,單別,採購單號,序號,單號(進貨單),採購日期,單據日期,品號,品名,規格,採購數量,數量合計,已交數量,驗收數量,預交日,進貨日期,驗收日期
 最後加上"進貨天數, 預計進貨天數, 延遲天數"，計算方式為：進貨天數=IF(OR(F2="",P2=""),"",NETWORKDAYS(F2,P2)), 預計進貨天數=IF(OR(F2="",O2=""),"",NETWORKDAYS(F2,O2)), 延遲天數=IF(OR(O2="",P2=""),"",T2-S2)
@@ -89,15 +88,11 @@ def main():
         '預交日 (TD身)': '預交日',          # 來自 TC_TD
         '進貨日期 (TG頭)': '進貨日期',
         '驗收日期 (TH身)': '驗收日期',
-        # '結案碼': '結案碼',               # 觀察原本 schema 可能沒有直接叫結案碼的，先略過或者填固定值
     }
     # 過濾出存在於 mapping 中的 key，並擷取這些欄位
     available_cols = {k: v for k, v in columns_mapping.items() if k in merged_df.columns}
     final_df = merged_df[list(available_cols.keys())].rename(columns=available_cols)
     
-    # 若有缺失的必須欄位補齊，例如 結案碼 (原表單沒有，先補 N)
-    if '結案碼' not in final_df.columns:
-        final_df['結案碼'] = 'N'
     print("📅 轉換日期格式與計算天數 ...")
     # 將日期字串轉換為 datetime 物件，如果轉換出錯就變成 NaT
     for col in ['採購日期', '單據日期', '預交日', '進貨日期', '驗收日期']:

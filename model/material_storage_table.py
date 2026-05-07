@@ -1,8 +1,7 @@
 '''
-抓取2025與MOCTA_MOCTB或許製程與物料對應表單。
-整理成一張製令與所需材料及其庫存的表單
+抓取 000-2025模組進線日期、INVMB、MOCTA_MOCTB，獲取 製程與物料對應表單。
+整理成一張製令與所需材料及其庫存的表單 與 model缺料物料.csv。前者涵蓋所有製程的物料及其庫存數量狀態，後者只有缺料物料。
 '''
-
 
 import pandas as pd
 import os
@@ -170,6 +169,7 @@ def run_shortage_model():
     
     # 進行合併
     result_df = calculate_material_shortage(demand_df, bom_df, inventory_data)
+
 
     # 9. 輸出完整分析結果
     file_path_csv = os.path.join(os.path.dirname(os.path.abspath(__file__)), '製程與所需物料庫存表.csv')

@@ -2,6 +2,7 @@
 使用過濾後的advanced_filter.csv做前處理，矩陣轉換之類的東西，生成訓練集與驗證集。
 最終檔案產出為C1_ML_Training_X.npz, C1_ML_Training_y.npy 等
 '''
+
 import pandas as pd
 import numpy as np
 import scipy.sparse as sp
@@ -82,7 +83,18 @@ df['LeadTime_MA3'] = df.groupby('品號')[col_leadtime].transform(lambda x: x.ro
 df['LeadTime_MA5'] = df.groupby('品號')[col_leadtime].transform(lambda x: x.rolling(5, min_periods=1).mean().shift(1)).fillna(0)
 
 # ==============================================================================
-# 4. 特徵工程 (分離數值型與稀疏矩陣型)
+# 4. 資料切分 進行 Data Splitting，分成20% validation 與 80% testing。K-fold 沒有更深入做 PT λ 的重新計算。
+# ==============================================================================
+print("正在洗牌與切分資料 indices...")
+indices = np.arange(df.shape[0])
+np.random.seed(42)
+np.random.shuffle(indices)
+
+idx_train, idx_test = train_test_split(indices, test_size=0.2, random_state=42)
+df_train = df.iloc[idx_train]
+
+# ==============================================================================
+# 5. 特徵工程 (分離數值型與稀疏矩陣型)
 # ==============================================================================
 print("開始執行特徵抽離與稀疏矩陣轉換 (Sparse Matrix)...")
 num_features = []
@@ -91,7 +103,10 @@ num_features = []
 col_amount = next((c for c in df.columns if '採購數量' in c), None)
 if col_amount:
     pt_amount = PowerTransformer(method='yeo-johnson', standardize=True)
-    df['Amount_PT'] = pt_amount.fit_transform(df[col_amount].fillna(0).values.reshape(-1, 1)).flatten()
+    # 僅對 df_train fit，避免 Data Leak
+    pt_amount.fit(df_train[col_amount].fillna(0).values.reshape(-1, 1))
+    # 對全量資料進行 transform
+    df['Amount_PT'] = pt_amount.transform(df[col_amount].fillna(0).values.reshape(-1, 1)).flatten()
     
     lambda_value = pt_amount.lambdas_[0]
     print(f"計算出的 Lambda 值為: {lambda_value}")
@@ -110,7 +125,8 @@ else:
 
 if '進貨天數(包含非工作日)' in df.columns:
     pt_holiday = PowerTransformer(method='yeo-johnson', standardize=True)
-    df['LeadTime_Holiday_PT'] = pt_holiday.fit_transform(df['進貨天數(包含非工作日)'].fillna(0).values.reshape(-1, 1)).flatten()
+    pt_holiday.fit(df_train['進貨天數(包含非工作日)'].fillna(0).values.reshape(-1, 1))
+    df['LeadTime_Holiday_PT'] = pt_holiday.transform(df['進貨天數(包含非工作日)'].fillna(0).values.reshape(-1, 1)).flatten()
 else:
     df['LeadTime_Holiday_PT'] = 0
 
@@ -126,8 +142,13 @@ if CONFIG_FEATURES.get('LeadTime_Include_Holiday', True): num_features.append('L
 
 # 目標值 y (獨立處理)
 pt_y = PowerTransformer(method='yeo-johnson', standardize=True)
-y_all = pt_y.fit_transform(df[col_leadtime].values.reshape(-1, 1)).flatten()
+# 僅對 y_train fit
+pt_y.fit(df_train[col_leadtime].values.reshape(-1, 1))
+# 對全量資料 transform
+y_all = pt_y.transform(df[col_leadtime].values.reshape(-1, 1)).flatten()
 joblib.dump(pt_y, 'target_power_transformer.joblib')
+
+y_train, y_test = y_all[idx_train], y_all[idx_test]
 
 # (B) 類別與雜湊特徵 (保留為稀疏矩陣 Sparse Blocks 以免記憶體爆炸)
 sparse_blocks = []
@@ -165,19 +186,6 @@ if CONFIG_FEATURES.get('Hash_Spec', True):
     hash_spec_sp = hasher_spec.transform(df['Name_Spec'].apply(lambda x: [x]))
     sparse_blocks.append(('Hash_Spec', hash_spec_sp))
 
-
-
-# ==============================================================================
-# 5. 資料切分與標準化
-# ==============================================================================
-print("正在洗牌與切分資料...")
-# 洗牌並記錄 indices
-indices = np.arange(df.shape[0])
-np.random.seed(42)
-np.random.shuffle(indices)
-
-idx_train, idx_test = train_test_split(indices, test_size=0.2, random_state=42)
-y_train, y_test = y_all[idx_train], y_all[idx_test]
 
 # ==============================================================================
 # 6. 特徵大整合堆疊 (Sparse HStack)
