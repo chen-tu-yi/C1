@@ -1,11 +1,7 @@
 '''
-需要把ERP_Table.xlsx中的PURTC/D, PURTG/H 共同合併，組成與下列格式相同的csv檔案。
+把ERP_Table.xlsx中的PURTC/D, PURTG/H 共同合併，組成與下列格式相同的csv檔案。
+PURT.csv為單純的採購單資訊，與其道或延遲天數的計算，並無預測結果。
 
-
-詳細方法為: 
-ERP_Table.xlsx中的sheet-PURTC_PURTD, sheet-PURTG_PURTH 以 [採購單號]欄位做為key，保留：採購單別,單別,採購單號,序號,單號(進貨單),採購日期,單據日期,品號,品名,規格,採購數量,數量合計,已交數量,驗收數量,預交日,進貨日期,驗收日期
-最後加上"進貨天數, 預計進貨天數, 延遲天數"，計算方式為：進貨天數=IF(OR(F2="",P2=""),"",NETWORKDAYS(F2,P2)), 預計進貨天數=IF(OR(F2="",O2=""),"",NETWORKDAYS(F2,O2)), 延遲天數=IF(OR(O2="",P2=""),"",T2-S2)
-其餘不需保留，並清洗無資料的欄位。，輸出成PURT.csv檔案。
 '''
 
 import pandas as pd

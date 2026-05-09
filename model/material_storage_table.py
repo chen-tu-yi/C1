@@ -1,7 +1,18 @@
 '''
 抓取 000-2025模組進線日期、INVMB、MOCTA_MOCTB，獲取 製程與物料對應表單。
 整理成一張製令與所需材料及其庫存的表單 與 model缺料物料.csv。前者涵蓋所有製程的物料及其庫存數量狀態，後者只有缺料物料。
+
+資料定義：
+製程與所需物料庫存表.csv: INVMB、2025、BOM
+model缺料物料.csv: 只包含缺料的製程與所需物料庫存表.csv
 '''
+'''
+TODO: 
+製程與所需物料庫存表.csv 的 累計需求計算方式不是單單的把所有需求量加起來，而是
+若前面已經有被庫存數量滿足的需求數量就不應該計算在裡面 累計需求應該只能包含未被滿足的需求的需求累計總和
+同理，庫存數量也要動態的跟著所需數量做變動，庫存>所需 則庫存-=所需且累計+=0，若庫存<所需 則反之
+'''
+
 
 import pandas as pd
 import os
@@ -106,21 +117,50 @@ def calculate_material_shortage(demand_df, bom_df, inventory_data):
     final_model['預計開工日'] = pd.to_datetime(final_model['預計開工日'], errors='coerce')
     final_model.sort_values(by=['預計開工日', '製令單號'], inplace=True)
     
-    # 針對每一種材料計算隨時間增加的累計需求
-    final_model['累計需求'] = final_model.groupby('材料品號 (TB身)')['需領用量 (TB身)'].cumsum()
-    
-    final_model['缺料狀態'] = final_model.apply(
-        lambda x: '缺料' if x['累計需求'] > x['庫存數量 (MB)'] else '庫存充足', 
-        axis=1
-    )
-    
     # 將數值欄位轉成整數，確保無小數點殘留
     final_model['需領用量 (TB身)'] = pd.to_numeric(final_model['需領用量 (TB身)'], errors='coerce').fillna(0).astype(int)
-    final_model['累計需求'] = pd.to_numeric(final_model['累計需求'], errors='coerce').fillna(0).astype(int)
     final_model['庫存數量 (MB)'] = pd.to_numeric(final_model['庫存數量 (MB)'], errors='coerce').fillna(0).astype(int)
+
+    def process_material_group(group):
+        current_inv = group['庫存數量 (MB)'].iloc[0] if not group.empty else 0
+        
+        cum_demand_list = []
+        inv_list = []
+        shortage_status_list = []
+        cumulative_unmet = 0
+        
+        for idx, row in group.iterrows():
+            req = row['需領用量 (TB身)']
+            
+            if current_inv >= req:
+                current_inv -= req
+                unmet = 0
+                status = '庫存充足'
+            else:
+                unmet = req - current_inv
+                current_inv = 0
+                status = '缺料'
+                
+            cumulative_unmet += unmet
+            
+            cum_demand_list.append(cumulative_unmet)
+            inv_list.append(current_inv)
+            shortage_status_list.append(status)
+            
+        group['累計需求'] = cum_demand_list
+        group['庫存數量 (MB)'] = inv_list
+        group['缺料狀態'] = shortage_status_list
+        group['缺料數量'] = cum_demand_list
+        return group
+
+    final_model = final_model.groupby('材料品號 (TB身)', group_keys=False).apply(process_material_group)
     
-    # 計算缺料數量，並將小於 0 的值直接 clip 為 0
-    final_model['缺料數量'] = (final_model['累計需求'] - final_model['庫存數量 (MB)']).clip(lower=0).astype(int)
+    # 計算完畢後再次排序確保順序正確
+    final_model.sort_values(by=['預計開工日', '製令單號'], inplace=True)
+    
+    final_model['累計需求'] = final_model['累計需求'].astype(int)
+    final_model['庫存數量 (MB)'] = final_model['庫存數量 (MB)'].astype(int)
+    final_model['缺料數量'] = final_model['缺料數量'].astype(int)
 
     # 取代欄位名稱
     rename_rules = {
