@@ -238,6 +238,15 @@ np.save('C1_ML_Training_y.npy', y_train)
 sp.save_npz('C1_ML_Test_X.npz', X_test_final)
 np.save('C1_ML_Test_y.npy', y_test)
 
+# 匯出 val set 的承諾交期天數，供 c1_models.py 計算 Late Recall
+col_required = '預計進貨天數'
+if col_required in df.columns:
+    required_days_test = df[col_required].fillna(0).values[idx_test]
+    np.save('C1_ML_Test_required_days.npy', required_days_test)
+    print(f"已匯出 val set 承諾交期天數: C1_ML_Test_required_days.npy ({len(required_days_test)} 筆)")
+else:
+    print(f"警告：找不到欄位 '{col_required}'，Late Recall 計算將無法使用")
+
 # 新增：匯出完整特徵集，提供後續 K-Fold Cross Validation 獨立使用
 print("正在匯出 K-Fold 全量資料檔案...")
 sp.save_npz('C1_ML_Full_X.npz', X_full_final)

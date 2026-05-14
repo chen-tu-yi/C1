@@ -76,6 +76,14 @@ git commit -m "message"
 
 git push --set-upstream origin main
 
+## 資料
+
+### 資料來源
+
+### 資料抓取
+
+### 資料清洗
+
 ## 特徵
 
 ### 1. 數值連續特徵 (Numerical Features) — 共 15 維
@@ -179,11 +187,6 @@ graph TD
 
 #### (B) 類別與雜湊特徵 (Sparse Blocks)
 
-- **前綴特徵 One-Hot (`Category_OneHot`)**：將品號字串轉換為大寫後，判斷是否為 `M0`、`M2`、`K`、`E` 開頭，產生 4 個 boolean 欄位，並封裝至 CSR 稀疏矩陣。
-- **完整品號雜湊 (`Hash_ID_Full`)**：使用 `FeatureHasher` 將整體品號字串進行特徵投影，轉換為 **128 維** 的稀疏空間。
-- **分段品號雜湊 (`Hash_ID_Split`)**：將品號補齊至 14 碼長度後，依特定編碼意義拆分為 4 個區段 (`0:2`, `2:6`, `6:10`, `10:14`)。每區塊各透過 `FeatureHasher` 投影至 32 維度，最後以稀疏矩陣水平合併 (hstack)。
-- **品名與規格組合雜湊 (`Hash_Spec`)**：由於稀疏矩陣無懼記憶體溢出，將「品名」與「規格」相接組合成新字串後，直接透過 `FeatureHasher` 進行高解析度投影 (目前設定維持 **256 維度**)。
-
 ### 輸入特徵 (Input Features: X)
 
 可透過 `c1_pre.py` 中的 `CONFIG_FEATURES` 開關決定是否放入模型：
@@ -192,9 +195,9 @@ graph TD
 - **14碼完整品號雜湊 (`Hash_ID_Full_`)**: 完整品號透過 FeatureHasher 投影至陣列 (`Hash_ID_Full_0~255`)
 - **分段品號雜湊 (`Hash_ID1_` ~ `Hash_ID4_`)**: 依編碼意義切分四段雜湊，透過 FeatureHasher ，共計產出 4*32=128 維度特徵 (`Hash_ID1_0` 等)
 - **品名+規格雜湊 (`Hash_Spec_`)**: 將品名+規格字串透過 FeatureHasher 進行高維度展開捕獲特定規格特性 (`Hash_Spec_0~255`)
-- **預計進貨天數**            PURT[進貨日期]-[採購日期]                                                  (`Expected_LeadTime_Log`) log1p
 - **採購數量**                PURT[採購數量]                                                             (`Amount_PT`) PowerTransformer
-- **進貨天數(包含非工作日)**                                                               (`LeadTime_Holiday_PT`) PowerTransformer
+- **預計進貨天數**            PURT[進貨日期]-[採購日期]                                                  (`Expected_LeadTime_Log`) log1p
+- **實際進貨天數(包含非工作日)**                                                               (`LeadTime_Holiday_PT`) PowerTransformer
 - **最近幾次的進貨天數MA** (`LeadTime_MA3`, `LeadTime_MA5`) StandardScaler
 - **歷史進貨天數統計** (`Hist_Mean_LeadTime`, `Hist_Std_LeadTime` 等) StandardScaler
 - **實際進貨天數_靜態統計** (`Hist_Actual_Mean`, `Hist_Actual_Max`, `Hist_Actual_Min` 等) StandardScaler

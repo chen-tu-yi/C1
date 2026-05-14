@@ -1,10 +1,5 @@
 === C1 採購延遲預測 訓練實驗紀錄 ===
-執行時間: 2026-04-10 03:19:15
-樣本數: 52808, 特徵數: 1299
+執行時間: 2026-05-12 04:06:59
+樣本數: 59758, 特徵數: 1299
 
-[XGBoost] PT Space - RMSE: 0.1841, MAE: 0.0806, R2: 0.9659 | Real Space - RMSE: 2.4863, MAE: 1.3650, R2: 0.9858, MAPE: 990.75% | Time: 125.17s
-[Neural Network] PT Space - RMSE: 0.2267, MAE: 0.1229, R2: 0.9482 | Real Space - RMSE: 3.4521, MAE: 2.2589, R2: 0.9726, MAPE: 1561.82% | Time: 55.28s
-
-=== K-Fold Cross Validation (5 Splits, 3 Repeats) ===
-[XGBoost] CV Mean ± Std | RMSE: 2.3950 ± 0.0392, MAE: 1.3274 ± 0.0123, MAPE: 9.74% ± 0.14%
-[Neural Network] CV Mean ± Std | RMSE: 4.1694 ± 0.5951, MAE: 2.7331 ± 0.3806, MAPE: 15.79% ± 1.08%
+[XGBoost] PT Space - RMSE: 0.2327, MAE: 0.0834, R2: 0.9489 | Real Space - RMSE: 2.3504, MAE: 1.3432, R2: 0.9878, MAPE: 9.92% | Late Recall: 0.5999 (TP=2988, TP+FN=4981) | Non-ontime Recall: 1.0000 (TP=11342, TP+FN=11342) | Ontime Recall: 0.0000 (TN=0, TN+FP=610) | Time: 168.04s
