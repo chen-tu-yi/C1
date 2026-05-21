@@ -10,6 +10,14 @@ import numpy as np
 import platform
 import warnings
 import os
+import sys
+
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_DIR = os.path.join(PROJECT_DIR, 'model')
+if MODEL_DIR not in sys.path:
+    sys.path.insert(0, MODEL_DIR)
+
+from material_filters import TARGET_ITEM_PREFIXES, filter_to_p_items, filter_to_target_prefixes
 
 # 1. 環境設定
 warnings.filterwarnings('ignore')
@@ -28,12 +36,14 @@ plt.rcParams['font.sans-serif'] = font_list
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid", {"font.sans-serif": font_list})
 
+# 清理圖表與輸出使用的品名標籤。
 # 輔助函式：清理標籤字串
 def clean_label(text):
     if isinstance(text, str):
         return text.replace('(', '').replace(')', '').replace('（', '').replace('）', '').strip()
     return text
 
+# 繪製目前資料範圍的物料風險散佈圖。
 def plot_riskmap(df, col_item, col_delay, step_name):
     # 計算每個物料的平均值和標準差，dropna 是為了忽略只有單筆紀錄導致無法計算 std 的物料
     png_dir = r"C:\local_file\專題\png\c1"
@@ -49,9 +59,10 @@ def plot_riskmap(df, col_item, col_delay, step_name):
     plt.xlim(-50, 50)
     plt.ylim(0, 80)
     plt.tight_layout()
-    plt.savefig(os.path.join(png_dir, "RiskMap_{step_name}.png", dpi=300)
+    plt.savefig(os.path.join(png_dir, f"RiskMap_{step_name}.png"), dpi=300)
     plt.close()
 
+# 執行 C1 採購資料清洗與特徵統計產出流程。
 def main():
     file_path = "PURT.csv"
     print(f"開始執行 C1 自動化分析流程，讀取檔案: {file_path}...")
@@ -112,13 +123,32 @@ def main():
     # ---------------------------------------------------------
     # 3. 範圍過濾 (Scope & Lead Time Filter)
     # ---------------------------------------------------------
-    # (A) 品號開頭 M0, M2, K, E 篩選
-    if col_id:
-        target_prefixes = ('M0', 'M2', 'K', 'E')
-        mask_prefix = df_clean[col_id].astype(str).str.upper().str.startswith(target_prefixes)
-        df_clean = df_clean[mask_prefix].copy()
-        print(f"品號範圍篩選完成 (M0, M2, K, E)")
-        plot_riskmap(df_clean, col_item, col_delay, '1_scope_filter')
+    # (A) 品號範圍篩選，再套用 INVMB 品號屬性 P。
+    if not col_id:
+        print("錯誤：找不到品號欄位，無法套用品號範圍與 INVMB 品號屬性 P 過濾。")
+        return
+
+    before_prefix_count = len(df_clean)
+    df_clean = filter_to_target_prefixes(df_clean, col_id)
+    print(
+        "品號範圍篩選完成 "
+        f"(prefixes={TARGET_ITEM_PREFIXES}，{before_prefix_count} -> {len(df_clean)} 筆)"
+    )
+
+    erp_path = os.path.join(PROJECT_DIR, 'ERP_Table.xlsx')
+    try:
+        before_p_count = len(df_clean)
+        df_clean, valid_items = filter_to_p_items(df_clean, col_id, erp_path=erp_path)
+    except (FileNotFoundError, KeyError, ValueError) as e:
+        print(f"錯誤：無法套用 INVMB 品號屬性 P 過濾，停止產出。原因：{e}")
+        return
+
+    print(
+        "品號屬性篩選完成 "
+        f"(INVMB 品號屬性 = 'P'，P 品號數 {len(valid_items)}，"
+        f"{before_p_count} -> {len(df_clean)} 筆)"
+    )
+    plot_riskmap(df_clean, col_item, col_delay, '1_scope_filter')
 
     # (B) {預計}進貨天數 <= 90 天
     if col_elt:

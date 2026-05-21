@@ -24,7 +24,15 @@ import scipy.sparse as sp
 import joblib
 import pandas as pd
 import os
+import sys
 from sklearn.model_selection import train_test_split
+
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_DIR = os.path.join(PROJECT_DIR, 'model')
+if MODEL_DIR not in sys.path:
+    sys.path.insert(0, MODEL_DIR)
+
+from material_filters import TARGET_ITEM_PREFIXES, load_p_item_ids
 
 # =========================================================
 # 1. 載入模型與資料
@@ -51,19 +59,17 @@ indices = np.arange(df.shape[0])
 idx_train, idx_test = train_test_split(indices, test_size=0.2, random_state=42)
 test_items = df['品號'].iloc[idx_test].astype(str).str.strip().values
 
-print("讀取 INVMB 過濾屬性為 'P' 的物料...")
+print("使用原本品號前綴與 INVMB 屬性 'P' 過濾測試集...")
 erp_path = r'C:\local_file\專題\ERP_Table.xlsx'
-if os.path.exists(erp_path):
-    try:
-        invmb_df = pd.read_excel(erp_path, sheet_name='INVMB', usecols=['品號 (MB)', '品號屬性 (MB)'])
-        valid_items = invmb_df[invmb_df['品號屬性 (MB)'].astype(str).str.strip().str.upper() == 'P']['品號 (MB)'].astype(str).str.strip().tolist()
-        mask = np.isin(test_items, valid_items)
-    except Exception as e:
-        print(f"讀取 INVMB 發生錯誤: {e}，將評估所有測試集。")
-        mask = np.ones(len(test_items), dtype=bool)
-else:
-    print(f"找不到 {erp_path}，將評估所有測試集。")
-    mask = np.ones(len(test_items), dtype=bool)
+test_item_series = pd.Series(test_items).astype(str).str.strip()
+prefix_mask = test_item_series.str.startswith(TARGET_ITEM_PREFIXES).to_numpy()
+try:
+    valid_items = load_p_item_ids(erp_path)
+    p_item_mask = np.isin(test_item_series.to_numpy(), list(valid_items))
+    mask = prefix_mask & p_item_mask
+except (FileNotFoundError, ValueError) as e:
+    print(f"讀取 INVMB 發生錯誤: {e}，僅套用原本品號前綴篩選。")
+    mask = prefix_mask
 
 print(f"過濾前測試集筆數: {len(test_items)}, 過濾後筆數: {mask.sum()}")
 

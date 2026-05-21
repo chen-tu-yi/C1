@@ -1,5 +1,5 @@
 === C1 採購延遲預測 訓練實驗紀錄 ===
-執行時間: 2026-05-12 04:06:59
-樣本數: 59758, 特徵數: 1299
+執行時間: 2026-05-21 13:49:44
+樣本數: 59719, 特徵數: 1299
 
-[XGBoost] PT Space - RMSE: 0.2327, MAE: 0.0834, R2: 0.9489 | Real Space - RMSE: 2.3504, MAE: 1.3432, R2: 0.9878, MAPE: 9.92% | Late Recall: 0.5999 (TP=2988, TP+FN=4981) | Non-ontime Recall: 1.0000 (TP=11342, TP+FN=11342) | Ontime Recall: 0.0000 (TN=0, TN+FP=610) | Time: 168.04s
+[XGBoost] PT Space - RMSE: 0.1508, MAE: 0.0818, R2: 0.9772 | Real Space - RMSE: 2.5400, MAE: 1.3895, R2: 0.9858, MAPE: 10.26% | Late Recall: 0.6439 (TP=4474, TP+FN=6948) | Non-ontime Recall: 1.0000 (TP=10575, TP+FN=10575) | Ontime Recall: 0.0000 (TN=0, TN+FP=1369) | Time: 134.32s

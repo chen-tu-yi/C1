@@ -15,6 +15,13 @@ import warnings
 from datetime import datetime, timedelta
 from sklearn.feature_extraction import FeatureHasher
 
+from material_filters import (
+    TARGET_ITEM_PREFIXES,
+    filter_to_item_ids,
+    filter_to_target_prefixes,
+    load_p_item_ids,
+)
+
 warnings.filterwarnings('ignore')
 
 
@@ -675,6 +682,7 @@ def label_demands(
 def prepare_and_predict():
     BASE_DIR = r'C:\local_file\專題\c1'
     MODEL_DIR = r'C:\local_file\專題\model'
+    ERP_PATH = r'C:\local_file\專題\ERP_Table.xlsx'
 
     INPUT_PATH = os.path.join(MODEL_DIR, 'Model缺料物料.csv')
     LOOKUP_PATH = os.path.join(MODEL_DIR, 'C1_Inference_Features_Lookup.csv')
@@ -693,6 +701,14 @@ def prepare_and_predict():
         print(f"錯誤：找不到模型檔案 {MODEL_PATH}")
         return
 
+    try:
+        p_item_ids = load_p_item_ids(ERP_PATH)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"錯誤：無法套用 INVMB 品號屬性 P 過濾，停止預測。原因：{e}")
+        return
+
+    print(f"已載入 INVMB 品號屬性 = 'P' 的品號數：{len(p_item_ids)}")
+
     print("正在載入模型組件...")
 
     models = {
@@ -705,7 +721,15 @@ def prepare_and_predict():
     print("正在載入特徵查找表...")
 
     lookup_df = pd.read_csv(LOOKUP_PATH)
+    lookup_before_prefix_count = len(lookup_df)
+    lookup_df = filter_to_target_prefixes(lookup_df, '品號')
+    lookup_before_p_count = len(lookup_df)
+    lookup_df = filter_to_item_ids(lookup_df, '品號', p_item_ids)
     lookup_df = lookup_df.drop_duplicates(subset=['品號'], keep='first')
+    print(
+        "-> 特徵查找表前綴 + P 過濾："
+        f"{lookup_before_prefix_count} -> {lookup_before_p_count} -> {len(lookup_df)} 筆"
+    )
 
     # =========================================================
     # 任務 1：預測未到貨採購單 PURT.csv
@@ -723,19 +747,22 @@ def prepare_and_predict():
         )
 
         purt_df.columns = purt_df.columns.str.strip()
+        purt_df['品號'] = purt_df['品號'].astype(str).str.strip()
         purt_df['已交數量'] = pd.to_numeric(
             purt_df['已交數量'],
             errors='coerce'
         ).fillna(0)
 
-        prefixes = ('M0', 'M2', 'E', 'K', 'm0', 'm2', 'e', 'k')
-
+        prefix_mask = purt_df['品號'].str.startswith(TARGET_ITEM_PREFIXES)
+        p_item_mask = purt_df['品號'].isin(p_item_ids)
         unfulfilled_mask = (
             (purt_df['已交數量'] <= 0)
-            & (purt_df['品號'].astype(str).str.startswith(prefixes))
+            & prefix_mask
+            & p_item_mask
         )
 
         purt_target_df = purt_df[unfulfilled_mask].copy()
+        print(f"-> PURT 未交採購單前綴 + P 過濾後需預測筆數：{len(purt_target_df)}")
 
         if not purt_target_df.empty:
             purt_pred_days = get_predictions(
@@ -815,6 +842,14 @@ def prepare_and_predict():
 
     df_shortage = pd.read_csv(INPUT_PATH, encoding='utf-8-sig')
     df_shortage.columns = df_shortage.columns.str.strip()
+    shortage_before_prefix_count = len(df_shortage)
+    df_shortage = filter_to_target_prefixes(df_shortage, '材料品號')
+    shortage_before_p_count = len(df_shortage)
+    df_shortage = filter_to_item_ids(df_shortage, '材料品號', p_item_ids)
+    print(
+        "-> 缺料物料表前綴 + P 過濾："
+        f"{shortage_before_prefix_count} -> {shortage_before_p_count} -> {len(df_shortage)} 筆"
+    )
 
     df_shortage['預計開工日'] = pd.to_datetime(
         df_shortage['預計開工日'],

@@ -18,7 +18,10 @@ import pandas as pd
 import os
 import re
 
+from material_filters import TARGET_ITEM_PREFIXES, filter_to_p_items, filter_to_target_prefixes
 
+
+# 自動尋找標題列位置並讀取 Excel。
 def find_header_and_read(file_path, sheet_name, keyword='製令單號'):
     """
     自動尋找標題列位置並讀取 Excel (處理標題在第二列的問題)。
@@ -34,7 +37,7 @@ def find_header_and_read(file_path, sheet_name, keyword='製令單號'):
     return df
 
 
-
+# 讀取未生產且未開始的製令需求。
 def fetch_demand_data():
     """
     從 000-2025模組進線日期.xlsx 獲取需求與預計開工日。
@@ -45,6 +48,7 @@ def fetch_demand_data():
     filtered = plan_df[mask].copy()
     return filtered[['製令單號', '規格', '製程名稱', '預計開工日']]
 
+# 讀取 BOM，保留原本品號前綴範圍後再限制 INVMB 品號屬性為 P。
 def fetch_bom_data():
     """
     從 ERP_Table.xlsx MOCTA_MOCTB 獲取產品與製程的 BOM 對照表。
@@ -53,13 +57,29 @@ def fetch_bom_data():
     # 加入 dtype={...} 強制指定型態
     bom_df = pd.read_excel(file_path, sheet_name='MOCTA_MOCTB', dtype={'製令單別 (TB身)': str, '製令單號 (TB身)': str})
     bom_df.columns = bom_df.columns.str.strip()
-    
-    # 新增過濾邏輯：[品號]欄位只看開頭為 M0, M2, E, K 的物料
-    prefixes = ('M0', 'M2', 'E', 'K', 'm0', 'm2', 'e', 'k')
-    bom_df = bom_df[bom_df['材料品號 (TB身)'].astype(str).str.startswith(prefixes)].copy()
+
+    before_prefix_count = len(bom_df)
+    bom_df = filter_to_target_prefixes(bom_df, '材料品號 (TB身)')
+    print(
+        "-> BOM 品號前綴過濾完成 "
+        f"(prefixes={TARGET_ITEM_PREFIXES}，{before_prefix_count} -> {len(bom_df)} 筆)"
+    )
+
+    before_p_count = len(bom_df)
+    bom_df, valid_items = filter_to_p_items(
+        bom_df,
+        '材料品號 (TB身)',
+        erp_path=file_path,
+    )
+    print(
+        "-> BOM 品號屬性過濾完成 "
+        f"(INVMB 品號屬性 = 'P'，P 品號數 {len(valid_items)}，"
+        f"{before_p_count} -> {len(bom_df)} 筆)"
+    )
     
     return bom_df[['製令單別 (TB身)', '製令單號 (TB身)', '產品規格 (TA頭)', '材料品號 (TB身)', '需領用量 (TB身)', '材料品名 (TB身)', '材料規格 (TB身)']]
 
+# 讀取 INVMB 即時庫存數量。
 def fetch_inventory_data():
     """
     從 ERP_Table.xlsx INVMB 獲取即時庫存數量。
@@ -69,6 +89,7 @@ def fetch_inventory_data():
     inventory_data.columns = inventory_data.columns.str.strip()
     return inventory_data[['品號 (MB)', '庫存數量 (MB)']]
 
+# 展開需求與 BOM，依時間線計算缺料狀態。
 def calculate_material_shortage(demand_df, bom_df, inventory_data):
     """
     1. 將需求單與 BOM 展開結合以製令單號合併
@@ -181,6 +202,7 @@ def calculate_material_shortage(demand_df, bom_df, inventory_data):
     ]
     return final_model[final_output_cols]
 
+# 執行缺料資料產出流程。
 def run_shortage_model():
     print("正在獲取來源數據...")
     demand_df = fetch_demand_data()

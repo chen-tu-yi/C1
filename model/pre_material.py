@@ -3,21 +3,22 @@
 再每次模型預測前執行，更新各個物料的數值
 '''
 
-'''
-TODO:
-預測前去invmb抓[品號屬性]欄位，只把欄位內容為"P"的物料跑預測，其餘不預測。
-'''
-
 import pandas as pd
 import numpy as np
 import os
 
+from material_filters import TARGET_ITEM_PREFIXES, filter_to_p_items, filter_to_target_prefixes
+
+
+# 產生模型推論時使用的物料歷史特徵查找表。
 def generate_model_features():
     # 1. 設定絕對路徑
-    BASE_DIR = r'C:\local_file\專題\c1'
+    MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_DIR = os.path.dirname(MODEL_DIR)
+    BASE_DIR = os.path.join(PROJECT_DIR, 'c1')
     ADV_PATH = os.path.join(BASE_DIR, 'C1_advance_filter.csv')
     STATS_PATH = os.path.join(BASE_DIR, 'C1_Stats_Filtered.csv')
-    OUTPUT_PATH = 'C1_Inference_Features_Lookup.csv'
+    OUTPUT_PATH = os.path.join(MODEL_DIR, 'C1_Inference_Features_Lookup.csv')
     
     if not os.path.exists(ADV_PATH):
         print(f"錯誤：找不到輸入檔案 {ADV_PATH}")
@@ -30,26 +31,27 @@ def generate_model_features():
     # 欄位清洗與格式轉換
     df.columns = df.columns.str.strip()
 
-    # --- 新增過濾邏輯：去 ERP_Table.xlsx 抓取 INVMB 的 [品號屬性] 欄位 ---
-    erp_path = r'C:\local_file\專題\ERP_Table.xlsx'
-    if os.path.exists(erp_path):
-        print("正在讀取 INVMB 以獲取品號屬性...")
-        try:
-            invmb_df = pd.read_excel(erp_path, sheet_name='INVMB', usecols=['品號 (MB)', '品號屬性 (MB)'])
-            valid_items = invmb_df[invmb_df['品號屬性 (MB)'].astype(str).str.strip().str.upper() == 'P']['品號 (MB)'].astype(str).str.strip().tolist()
-            df = df[df['品號'].isin(valid_items)].copy()
-            print(f"完成品號屬性過濾 (僅保留屬性為 'P')，賸餘資料筆數：{len(df)}")
-        except Exception as e:
-            print(f"讀取 INVMB 發生錯誤: {e}，改用前綴過濾。")
-            prefixes = ('M0', 'M2', 'E', 'K', 'm0', 'm2', 'e', 'k')
-            df = df[df['品號'].str.startswith(prefixes)].copy()
-            print(f"完成品號前綴過濾，賸餘資料筆數：{len(df)}")
-    else:
-        print(f"找不到 {erp_path}，使用原本的前綴過濾。")
-        prefixes = ('M0', 'M2', 'E', 'K', 'm0', 'm2', 'e', 'k')
-        df = df[df['品號'].str.startswith(prefixes)].copy()
-        print(f"完成品號前綴過濾，賸餘資料筆數：{len(df)}")
+    # 先保留原本品號前綴範圍，再只保留 INVMB 品號屬性為 P 的物料。
+    before_prefix_count = len(df)
+    df = filter_to_target_prefixes(df, '品號')
+    print(
+        "完成品號前綴過濾 "
+        f"(prefixes={TARGET_ITEM_PREFIXES}，{before_prefix_count} -> {len(df)} 筆)"
+    )
 
+    erp_path = os.path.join(PROJECT_DIR, 'ERP_Table.xlsx')
+    try:
+        before_p_count = len(df)
+        df, valid_items = filter_to_p_items(df, '品號', erp_path=erp_path)
+    except (FileNotFoundError, KeyError, ValueError) as e:
+        print(f"錯誤：無法套用 INVMB 品號屬性 P 過濾，停止產出。原因：{e}")
+        return
+
+    print(
+        "完成品號屬性過濾 "
+        f"(INVMB 品號屬性 = 'P'，P 品號數 {len(valid_items)}，"
+        f"{before_p_count} -> {len(df)} 筆)"
+    )
 
     # 確保關鍵欄位轉為數值
     col_leadtime = '實際進貨天數' if '實際進貨天數' in df.columns else '進貨天數'
@@ -106,8 +108,8 @@ def generate_model_features():
     stats_df['Hist_Actual_CV'] = stats_df['Hist_Actual_Std'] / stats_df['Hist_Actual_Mean'].replace(0, 1)
 
     # 6. 計算 LeadTime_MA (MA3, MA5)
-    ma3 = df.groupby('品號').apply(lambda x: get_latest_ma(x, 3)).to_dict()
-    ma5 = df.groupby('品號').apply(lambda x: get_latest_ma(x, 5)).to_dict()
+    ma3 = df.groupby('品號')[col_leadtime].apply(lambda s: s.tail(3).mean()).to_dict()
+    ma5 = df.groupby('品號')[col_leadtime].apply(lambda s: s.tail(5).mean()).to_dict()    
     
     stats_df['LeadTime_MA3'] = stats_df['品號'].map(ma3)
     stats_df['LeadTime_MA5'] = stats_df['品號'].map(ma5)
