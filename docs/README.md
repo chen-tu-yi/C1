@@ -4,9 +4,12 @@
 
 ### 1. 工作流
 
+```text
 -------
 
 cd c:\local_file\專題
+```
+
 
 python auto.py                      # 從EPR中依據ERP_Table_Name.xlsx抓取資料到 ERP_Table.xlsx
 
@@ -37,6 +40,7 @@ python all_table.py                 # 把預測後的結果與整張製程合併
 ### TODO
 畫 error map，表格幾攤到幾天|分佈趴數。
 做源資料集預計到貨天分析。
+
 
 ------------------------------------------------------------------------------------
 
@@ -72,11 +76,14 @@ python all_table.py                 # 把預測後的結果與整張製程合併
 
 ### 2. Git 方法
 
+```text
 git status
 git add .
 git commit -m "message"
 
 git push --set-upstream origin main
+```
+
 
 ## 資料
 
