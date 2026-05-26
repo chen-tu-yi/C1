@@ -5,7 +5,6 @@
 ### 1. 工作流
 
 ```text
--------
 
 cd c:\local_file\專題
 ```
@@ -13,7 +12,6 @@ cd c:\local_file\專題
 
 python auto.py                      # 從EPR中依據ERP_Table_Name.xlsx抓取資料到 ERP_Table.xlsx
 
--------
 
 cd c:\local_file\專題\c1
 
@@ -25,7 +23,7 @@ python c1_pre.py                    # model資料前處理    # PT λ leak,
 
 python c1_models.py                 # 訓練model，生成baseline等。
 
--------
+
 
 cd c:\local_file\專題\model
 
@@ -36,6 +34,7 @@ python pre_material.py              # 做前處理以丟給model
 python model_predict.py             # 預測模型
 
 python all_table.py                 # 把預測後的結果與整張製程合併在一起，為最終建立db的資料檔"製令總表.csv"
+```
 
 ### TODO
 畫 error map，表格幾攤到幾天|分佈趴數。
@@ -392,9 +391,7 @@ $$
 
 Risk_Report.txt: 專門列出高風險製令名單。
 
-## 打包給公司
-
-必備資料：
+## 
 
 ## 介面簡介
 
