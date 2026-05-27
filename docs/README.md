@@ -7,11 +7,8 @@
 ```text
 
 cd c:\local_file\專題
-```
-
 
 python auto.py                      # 從EPR中依據ERP_Table_Name.xlsx抓取資料到 ERP_Table.xlsx
-
 
 cd c:\local_file\專題\c1
 
@@ -22,7 +19,6 @@ python c1_filter.py                 # 過濾清洗PURT.csv 的資料
 python c1_pre.py                    # model資料前處理    # PT λ leak,
 
 python c1_models.py                 # 訓練model，生成baseline等。
-
 
 
 cd c:\local_file\專題\model
