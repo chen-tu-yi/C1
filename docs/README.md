@@ -123,14 +123,9 @@ git commit -m "message"
 git push --set-upstream origin main
 ```
 
-
-## 資料
-
 ### 資料來源
+<img width="963" height="381" alt="image" src="https://github.com/user-attachments/assets/f26ee2fc-3506-4f02-bc27-bc31cf7cd6ec" />
 
-### 資料抓取
-
-### 資料清洗
 
 ## 特徵
 
